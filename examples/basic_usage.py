@@ -1,0 +1,48 @@
+from radcot import RadCoT
+
+def main():
+    # Sample radiology report
+    report = """
+    EXAMINATION: CT CHEST WITHOUT CONTRAST
+    
+    CLINICAL INDICATION: Shortness of breath, rule out pulmonary embolism
+    
+    TECHNIQUE: Helical CT images were obtained through the chest without intravenous contrast.
+    
+    FINDINGS:
+    
+    LUNGS: There is a 2.5 cm nodular opacity in the right lower lobe with spiculated margins. There is a 1.2 cm nodule in the left upper lobe. No evidence of pulmonary embolism. No pleural effusions.
+    
+    HEART: The heart is normal in size. The pericardium is unremarkable.
+    
+    MEDIASTINUM: The mediastinal contours are normal. No significant lymphadenopathy.
+    
+    VASCULATURE: The thoracic aorta is normal in caliber. No evidence of aneurysm or dissection.
+    
+    PLEURA: No pleural effusions or pneumothorax.
+    
+    OSSEOUS STRUCTURES: No acute fractures. Degenerative changes in the thoracic spine.
+    
+    IMPRESSION:
+    1. 2.5 cm spiculated nodule in the left lower lobe, highly suspicious for primary lung malignancy. Recommend PET/CT for further evaluation.
+    2. 1.2 cm nodule in the left upper lobe, likely granuloma but follow-up recommended.
+    3. No evidence of pulmonary embolism.
+    4. Degenerative changes in the thoracic spine.
+    """
+    
+    # Initialize RadCoT with GPT-4o
+    radcot_detector = RadCoT(model_name="gpt-4o", use_radcot=True)
+    
+    # Detect errors using RadCoT framework
+    results = radcot_detector.detect_errors(report)
+    
+    # Print results
+    print("Detected Errors:")
+    for i, error in enumerate(results["errors"]):
+        print(f"{i+1}. {error['description']} (Confidence: {error['confidence']})")
+    
+    print("\nReasoning Trace (Step 4: Findings-Impression Alignment):")
+    print(results["reasoning_trace"]["step_4"])
+
+if __name__ == "__main__":
+    main()
