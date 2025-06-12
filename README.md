@@ -1,3 +1,10 @@
+<p align="center">
+  <img src="assets/logo.png" alt="RadCoT Logo" width="200">
+</p>
+
+# RadCoT: Radiological Chain-of-Thought Framework
+
+A specialized reasoning framework for enhanced error detection in radiology reports.
 # RadCoT: Radiological Chain-of-Thought Framework
 
 ## Overview
