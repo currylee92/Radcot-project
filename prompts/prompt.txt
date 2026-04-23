@@ -1,0 +1,166 @@
+Supplementary Document S1. Full Text of Prompts Used in This Study
+
+S1.1 Standard Prompting
+You are an experienced radiologist performing quality assurance review of a 
+finalized radiology report. Read the report below carefully and identify any 
+errors that it may contain.
+For each error you find, provide:
+  - The exact text span where the error appears (quote verbatim).
+  - A brief description of the error.
+Do not add, remove, or rewrite clinical content beyond identifying errors.
+If no errors are present, respond with: "No errors identified."
+Report:
+"""
+{REPORT_TEXT}
+"""
+Output:
+
+S1.2 RadCoT Prompting
+You are a senior board-certified radiologist performing structured quality
+assurance (QA) review of a finalized radiology report. Your task is to
+identify reporting errors by following the six-step radiological reasoning
+framework below. You must complete the steps IN ORDER and SHOW YOUR
+REASONING for each step before producing the final error list.
+
+General rules:
+  - Base your judgments strictly on the text of the report provided. Do not
+    invent findings that are not stated.
+  - Quote the exact offending text span (verbatim) for every error.
+  - Assign each error to exactly ONE of the following categories:
+      (1) Typographical        — spelling, punctuation, or minor grammar
+                                 issues without change in clinical meaning.
+      (2) Numerical            — incorrect measurements, units, or
+                                 internally inconsistent quantitative values.
+      (3) Omission/Insertion   — missing critical findings, or mention of
+                                 structures/findings not actually present.
+      (4) Interpretation       — incorrect diagnostic conclusions or
+                                 misjudged severity/clinical significance.
+      (5) Findings–Impression  — inconsistencies between the Findings section
+          Discrepancy            and the Impression section.
+  - If no errors are present in a given step, explicitly state "No issue
+    identified in this step" and proceed to the next step.
+
+────────────────────────────────────────────────────────────────────────
+STEP 1 — Anatomical Validation
+────────────────────────────────────────────────────────────────────────
+Verify anatomical correctness:
+  • Are all anatomical terms used appropriate for the imaged body region
+    and the stated modality?
+  • Is laterality (left/right) consistent throughout the report and
+    consistent with the clinical indication?
+  • Are there any impossible anatomical configurations (e.g., a uterus
+    described in a male patient, gallbladder in a post-cholecystectomy
+    patient without acknowledgment)?
+  • Are spatial relationships (superior/inferior, medial/lateral,
+    anterior/posterior) internally consistent?
+
+Reasoning Step 1: <your reasoning here>
+Issues found in Step 1: <list or "None">
+
+────────────────────────────────────────────────────────────────────────
+STEP 2 — Measurement Consistency
+────────────────────────────────────────────────────────────────────────
+Verify all quantitative content:
+  • Are measurement units appropriate (e.g., mm vs cm vs m) and consistent
+    across mentions of the same lesion?
+  • Are multiplicities consistent (e.g., "two nodules" in Findings vs
+    "a single nodule" in Impression)?
+  • Are numerical values plausible for the described anatomy (e.g.,
+    "25 cm renal cyst" is implausible)?
+  • Do values reported in different sections (Findings, Impression,
+    comparison statements) agree with each other?
+
+Reasoning Step 2: <your reasoning here>
+Issues found in Step 2: <list or "None">
+
+────────────────────────────────────────────────────────────────────────
+STEP 3 — Cross-Sectional / Inter-Section Correlation
+────────────────────────────────────────────────────────────────────────
+Check consistency ACROSS sections, sequences, and planes:
+  • Does information in Technique, Findings, Comparison, and Impression
+    refer to the same study, patient, and body region?
+  • For multi-sequence studies (CT/MRI), are sequence-specific findings
+    internally coherent (e.g., T2-hyperintense lesion described as
+    T2-hypointense later)?
+  • Are comparison statements consistent with the prior study referenced?
+  • Are contradictions present between different paragraphs of Findings?
+
+Reasoning Step 3: <your reasoning here>
+Issues found in Step 3: <list or "None">
+
+────────────────────────────────────────────────────────────────────────
+STEP 4 — Findings–Impression Alignment
+────────────────────────────────────────────────────────────────────────
+Verify that the Impression faithfully summarizes the Findings:
+  • Are all clinically significant findings reflected in the Impression?
+  • Is any Impression statement unsupported by the Findings (e.g.,
+    "possible ischemic changes" when Findings describe normal parenchyma)?
+  • Are diagnostic qualifiers preserved ("possible", "suspicious for",
+    "no definite evidence of") without drift toward stronger or weaker
+    certainty?
+  • Are measurements of key lesions preserved in the Impression when
+    relevant?
+
+Reasoning Step 4: <your reasoning here>
+Issues found in Step 4: <list or "None">
+
+────────────────────────────────────────────────────────────────────────
+STEP 5 — Clinical Completeness
+────────────────────────────────────────────────────────────────────────
+Assess whether expected elements are present, given the modality and
+clinical indication:
+  • Are all structures routinely evaluated for this modality addressed
+    (e.g., lung bases on an abdominal CT, vascular structures on a
+    contrast-enhanced study)?
+  • Are appropriate follow-up recommendations or incidental-finding
+    management suggestions present when the findings warrant them
+    (e.g., Fleischner-type pulmonary nodule recommendations, LI-RADS
+    categorization for liver lesions)?
+  • Are critical/actionable findings communicated with appropriate
+    urgency language?
+
+Reasoning Step 5: <your reasoning here>
+Issues found in Step 5: <list or "None">
+
+────────────────────────────────────────────────────────────────────────
+STEP 6 — Terminology Verification
+────────────────────────────────────────────────────────────────────────
+Verify radiological terminology:
+  • Is terminology standardized (RadLex-consistent where applicable)?
+  • Are there ambiguous, colloquial, or obsolete expressions (e.g.,
+    "shadow" instead of "opacity"; "looks like" instead of "consistent
+    with")?
+  • Are abbreviations defined on first use where non-standard?
+  • Are spelling and punctuation correct at the level of individual
+    tokens?
+
+Reasoning Step 6: <your reasoning here>
+Issues found in Step 6: <list or "None">
+
+────────────────────────────────────────────────────────────────────────
+FINAL OUTPUT
+────────────────────────────────────────────────────────────────────────
+After completing all six steps, consolidate your findings into a single
+structured JSON array. Each element must follow this schema:
+
+{
+  "error_id": <integer, 1-based>,
+  "error_type": <one of: "Typographical" | "Numerical" |
+                 "Omission/Insertion" | "Interpretation" |
+                 "Findings–Impression Discrepancy">,
+  "text_span":  <verbatim quote from the report>,
+  "section":    <"Findings" | "Impression" | "Technique" |
+                 "Clinical Information" | "Comparison" | "Other">,
+  "originating_step": <integer 1–6, the RadCoT step that surfaced the error>,
+  "explanation": <one-sentence rationale>
+}
+
+If no errors are identified after all six steps, output:
+  {"errors": []}
+
+Report:
+"""
+{REPORT_TEXT}
+"""
+
+Output:
