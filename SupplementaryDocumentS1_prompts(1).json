@@ -1,0 +1,373 @@
+{
+  "document_id": "SupplementaryDocumentS1",
+  "title": "Full Prompt Specifications and Evaluation Protocol for the RadCoT Framework",
+  "version": "2.0",
+  "release_date": "2026-04",
+  "license": "CC-BY-4.0",
+  "citation": "Li J, Zhou Z, et al. RadCoT: Radiological Chain-of-Thought Framework for LLM-Based Radiology Report Quality Assurance.",
+  "repository": "https://github.com/currylee92/Radcot-project",
+  "scope": {
+    "task": "text-level retrospective quality assurance of finalized radiology reports",
+    "out_of_scope": [
+      "image-level perceptual error detection",
+      "generation or rewriting of report content",
+      "autonomous clinical decision-making without radiologist adjudication"
+    ]
+  },
+  "design_principles": [
+    "Evidence-grounded: every reported error must be anchored to a verbatim report span.",
+    "Taxonomy-constrained: all errors must be assigned to exactly one of five predefined categories.",
+    "Workflow-aligned: reasoning steps mirror the sequential review used by expert radiologists.",
+    "Calibrated abstention: the model must abstain on invalid, truncated, or out-of-domain inputs.",
+    "Deterministic decoding: temperature = 0 to minimize stochastic variability across runs.",
+    "Schema-enforced: outputs must validate against the published JSON Schema (Draft 2020-12)."
+  ],
+  "decoding_parameters": {
+    "temperature": 0,
+    "top_p": 1.0,
+    "max_output_tokens": 4096,
+    "frequency_penalty": 0,
+    "presence_penalty": 0,
+    "repetition_penalty": 1.0,
+    "stop_sequences": [],
+    "seed_policy": "Greedy decoding; seeds not required for deterministic closed-source APIs."
+  },
+  "input_contract": {
+    "variables": {
+      "REPORT_TEXT": { "type": "string", "required": true, "description": "Full finalized radiology report text including all sections." },
+      "MODALITY": { "type": "string", "required": true, "enum": ["Radiography", "Ultrasound", "CT", "MRI"] },
+      "BODY_REGION": { "type": "string", "required": true },
+      "INDICATION": { "type": "string", "required": false },
+      "PRIOR_STUDIES": { "type": "string", "required": false, "description": "Free-text description of comparison studies, if any." }
+    },
+    "preprocessing": [
+      "Unicode normalization to NFKC.",
+      "Whitespace collapsing while preserving section boundaries.",
+      "No de-identification beyond what was already applied upstream.",
+      "No lexical substitution or synonym expansion."
+    ]
+  },
+  "error_taxonomy": {
+    "version": "radcot-tax-1.0",
+    "mutually_exclusive": true,
+    "categories": {
+      "T1_Typographical": {
+        "label": "Typographical",
+        "definition": "Spelling, punctuation, casing, or minor grammatical issues that do not alter clinical meaning.",
+        "positive_examples": ["pnuemonia → pneumonia", "no,mass identified → no mass identified"],
+        "negative_examples": ["Substituting 'left' for 'right' is not typographical; see T3."]
+      },
+      "T2_Numerical": {
+        "label": "Numerical",
+        "definition": "Incorrect, implausible, or internally inconsistent measurements, units, counts, dates, ages, or quantitative values.",
+        "positive_examples": ["Lesion measured as 3.2 m (plausible value: 3.2 cm).", "Lesion 2.1 cm in findings, 1.2 cm in impression."],
+        "negative_examples": ["A quantitatively plausible but clinically misinterpreted value is T4."]
+      },
+      "T3_OmissionInsertion": {
+        "label": "Omission/Insertion",
+        "definition": "Missing clinically relevant content, unsupported inserted content, anatomically impossible references, or content inconsistent with patient context.",
+        "positive_examples": ["Uterus described in abdominal CT of a male patient.", "Failure to mention a documented indication-relevant structure."],
+        "negative_examples": ["An incorrect diagnostic conclusion drawn from present findings is T4."]
+      },
+      "T4_Interpretation": {
+        "label": "Interpretation",
+        "definition": "Diagnostic conclusions or severity judgments that are unsupported by, or inconsistent with, the reported findings.",
+        "positive_examples": ["Findings describe a large pulmonary mass; impression recommends 'observation' instead of urgent evaluation."],
+        "negative_examples": ["A mere omission of a recommendation is T3 unless an incorrect recommendation is actively stated."]
+      },
+      "T5_FindingsImpressionDiscrepancy": {
+        "label": "Findings-Impression Discrepancy",
+        "definition": "Logical, semantic, or certainty inconsistency between the findings and the impression sections.",
+        "positive_examples": ["Findings state 'normal brain parenchyma'; impression states 'possible ischemic changes'."],
+        "negative_examples": ["A finding present in one section but missing from the other, without logical contradiction, is T3."]
+      }
+    },
+    "disambiguation_priority": [
+      "T4_Interpretation",
+      "T5_FindingsImpressionDiscrepancy",
+      "T3_OmissionInsertion",
+      "T2_Numerical",
+      "T1_Typographical"
+    ],
+    "disambiguation_rule": "When a candidate error satisfies multiple categories, assign it to the highest-priority category in this list. This prevents clinically significant errors from being diluted into lower-severity labels."
+  },
+  "severity_rubric": {
+    "minor": {
+      "criterion": "No change in clinical meaning or management.",
+      "prototypes": ["Spelling error without ambiguity.", "Non-clinical stylistic inconsistency."]
+    },
+    "moderate": {
+      "criterion": "Potentially affects communication clarity or downstream interpretation but unlikely to change immediate management.",
+      "prototypes": ["Inconsistent lesion size between sections where the discrepancy is small.", "Missing non-critical descriptor."]
+    },
+    "major": {
+      "criterion": "Likely to affect diagnosis, management, or patient safety if uncorrected.",
+      "prototypes": ["Wrong laterality for a surgical target.", "Impression contradicting findings on a critical result."]
+    }
+  },
+  "prompts": {
+    "standard_prompting": {
+      "id": "baseline_v2",
+      "description": "Unstructured single-turn prompt representing the way LLMs are typically used for ad-hoc QA without domain-specific scaffolding.",
+      "system": "You are assisting with quality assurance review of a finalized radiology report. Your task is to identify reporting errors in the report text. Base all judgments strictly on the provided report text. Do not rewrite the report, embellish the findings, or infer image findings that are not explicitly stated. Return JSON only.",
+      "user": "Task\nRead the radiology report provided under <REPORT> and identify every reporting error it contains.\n\nInput\n<REPORT>\n{REPORT_TEXT}\n</REPORT>\n<METADATA>\nmodality: {MODALITY}\nbody_region: {BODY_REGION}\nclinical_indication: {INDICATION}\n</METADATA>\n\nRequirements\n1. Base all judgments strictly on the report text.\n2. Quote the exact offending text span for each error.\n3. Assign each error to exactly one of the following categories: Typographical, Numerical, Omission/Insertion, Interpretation, Findings-Impression Discrepancy.\n4. Provide a one-sentence description of the error.\n5. If no errors are present, return exactly: {\"errors\": []}.\n\nOutput format\nReturn strict JSON only, with no prose before or after the JSON object.",
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["errors"],
+        "additionalProperties": false,
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["error_id", "error_type", "text_span", "description"],
+              "additionalProperties": false,
+              "properties": {
+                "error_id": { "type": "integer", "minimum": 1 },
+                "error_type": {
+                  "type": "string",
+                  "enum": ["Typographical", "Numerical", "Omission/Insertion", "Interpretation", "Findings-Impression Discrepancy"]
+                },
+                "text_span": { "type": "string", "minLength": 1 },
+                "description": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "radcot_prompting": {
+      "id": "radcot_v2",
+      "description": "Six-step radiology-specific chain-of-thought prompt that mirrors the sequential review workflow of expert radiologists. Combines workflow decomposition, taxonomy-constrained labeling, calibrated abstention, and schema-enforced structured output.",
+      "system": "You are an expert radiology quality-assurance assistant performing structured text-level review of a finalized radiology report. You must (1) execute the six-step RadCoT review protocol in order, (2) anchor every flagged error to a verbatim text span from the input, (3) assign each error to exactly one category from the predefined taxonomy using the disambiguation priority, (4) grade severity using the published rubric, (5) report a calibrated confidence in [0, 1], (6) abstain on invalid, truncated, or out-of-domain input, and (7) return a single JSON object that validates against the published schema. Do not infer unstated image findings. Do not rewrite or summarize the report. When evidence is ambiguous, prefer a conservative (non-calling) decision and mark the item uncertain. Produce JSON only, with no prose before or after.",
+      "user": "Task\nPerform a structured RadCoT review of the report in <REPORT> and report all detectable text-level errors.\n\nInput\n<REPORT>\n{REPORT_TEXT}\n</REPORT>\n<METADATA>\nmodality: {MODALITY}\nbody_region: {BODY_REGION}\nclinical_indication: {INDICATION}\nprior_studies: {PRIOR_STUDIES}\n</METADATA>\n\nProtocol\nExecute Steps 1 through 6 in order using the review_protocol specification. At each step, collect candidate errors, then apply the disambiguation priority and self_verification rules before emitting the final JSON.\n\nOperational requirements\n1. Anchor each reported error to a verbatim span copied character-for-character from <REPORT>.\n2. Assign each error to exactly one taxonomy category (T1–T5), resolving overlaps via disambiguation_priority.\n3. Attribute each error to the first RadCoT step at which it was identified (originating_step, 1–6).\n4. Grade severity as minor, moderate, or major per the severity_rubric.\n5. Provide a calibrated confidence score in [0, 1]; set uncertain = true when confidence < 0.6 or when evidence is ambiguous.\n6. Merge overlapping candidates referring to the same underlying issue.\n7. If the input is empty, truncated, or not a radiology report, set abstain = true and populate abstain_reason.\n8. Populate the summary object consistently with the emitted error list.\n\nOutput\nReturn a single JSON object that validates against output_schema. Do not include chain-of-thought text outside the JSON object.",
+      "review_protocol": [
+        {
+          "step": 1,
+          "name": "Anatomical Validation",
+          "objective": "Verify that anatomical references are coherent with modality, body region, laterality, and patient context.",
+          "checklist": [
+            "Are anatomical terms appropriate for the stated modality and body region?",
+            "Is laterality internally consistent across sections?",
+            "Are anatomically impossible configurations or cross-sex anatomy present?",
+            "Are spatial relationships (superior/inferior, medial/lateral, anterior/posterior) mutually consistent?",
+            "Are referenced structures plausibly within the stated field of view?"
+          ],
+          "target_categories": ["T3_OmissionInsertion", "T4_Interpretation"]
+        },
+        {
+          "step": 2,
+          "name": "Measurement and Quantitative Consistency",
+          "objective": "Verify all quantitative content for correctness and internal consistency.",
+          "checklist": [
+            "Are units correct and consistent (mm vs cm vs m; HU; mL)?",
+            "Do multiplicity descriptors (single/multiple/numeric counts) agree across sections?",
+            "Are quantitative values biologically and anatomically plausible?",
+            "Do measurements in findings, impression, and comparison agree?",
+            "Are dates, ages, and temporal references internally consistent?"
+          ],
+          "target_categories": ["T2_Numerical"]
+        },
+        {
+          "step": 3,
+          "name": "Cross-Sectional and Inter-Sequence Correlation",
+          "objective": "Verify coherence across report sections, imaging sequences, and comparison statements.",
+          "checklist": [
+            "Do technique, findings, comparison, and impression refer to the same study and region?",
+            "For multi-sequence studies (e.g., MRI T1/T2/DWI), are sequence-specific descriptors internally coherent?",
+            "Are comparison statements (stable, increased, decreased) consistent with the reported values?",
+            "Are separate findings paragraphs mutually consistent?"
+          ],
+          "target_categories": ["T3_OmissionInsertion", "T5_FindingsImpressionDiscrepancy"]
+        },
+        {
+          "step": 4,
+          "name": "Findings-Impression Alignment",
+          "objective": "Verify that the impression faithfully summarizes the findings.",
+          "checklist": [
+            "Does the impression cover all clinically significant findings?",
+            "Is each impression statement supported by a finding?",
+            "Is diagnostic certainty preserved (no silent upgrade from 'possible' to 'definite' or vice versa)?",
+            "Are key quantitative details preserved when clinically relevant?",
+            "Are actionable or critical findings flagged appropriately?"
+          ],
+          "target_categories": ["T5_FindingsImpressionDiscrepancy", "T4_Interpretation"]
+        },
+        {
+          "step": 5,
+          "name": "Clinical Completeness",
+          "objective": "Assess whether expected report elements are present, conditional on modality and indication.",
+          "checklist": [
+            "Are routine structures relevant to the examination addressed?",
+            "Is the indication-specific target question explicitly evaluated?",
+            "Are guideline-relevant recommendations included when warranted?",
+            "Is appropriate escalation language used for critical or actionable findings?"
+          ],
+          "target_categories": ["T3_OmissionInsertion", "T4_Interpretation"]
+        },
+        {
+          "step": 6,
+          "name": "Terminology Verification",
+          "objective": "Verify terminology quality at the token and phrase level.",
+          "checklist": [
+            "Is standardized terminology used where applicable (e.g., RadLex-consistent descriptors)?",
+            "Are ambiguous or colloquial expressions avoided?",
+            "Are abbreviations defined on first use or unambiguous in context?",
+            "Are spelling, punctuation, and casing correct at the token level?"
+          ],
+          "target_categories": ["T1_Typographical", "T4_Interpretation"]
+        }
+      ],
+      "self_verification": [
+        "Every reported text_span must appear verbatim in <REPORT> (exact substring match).",
+        "Every error must be assigned to exactly one category from the taxonomy.",
+        "Overlapping candidates referring to the same underlying issue must be merged into a single error.",
+        "Severity must follow the severity_rubric; do not invent new severity labels.",
+        "Confidence must be numeric in [0, 1]; items with confidence < 0.6 must have uncertain = true.",
+        "If any of the above constraints cannot be satisfied, set abstain = true with an explicit abstain_reason."
+      ],
+      "abstention_policy": {
+        "triggers": [
+          "Input is empty, whitespace-only, or a non-report string.",
+          "Input is truncated mid-sentence such that sections cannot be identified.",
+          "Input is clearly not a radiology report (e.g., a pathology note, discharge summary).",
+          "Input is in an unsupported language for which the model cannot reliably extract sections."
+        ],
+        "on_trigger": "Emit a JSON object with abstain = true, abstain_reason populated, errors = [], and summary populated with zero counts."
+      },
+      "calibration_notes": [
+        "Confidence should reflect the model's probabilistic belief that the flagged span is a genuine error under the taxonomy, not confidence in the label verbatim.",
+        "Do not inflate confidence for high-severity items; severity and confidence are independent axes."
+      ],
+      "output_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["abstain", "abstain_reason", "errors", "summary"],
+        "additionalProperties": false,
+        "properties": {
+          "abstain": { "type": "boolean" },
+          "abstain_reason": { "type": ["string", "null"] },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "error_id", "error_type", "text_span", "section",
+                "originating_step", "severity", "confidence", "uncertain", "explanation"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "error_id": { "type": "integer", "minimum": 1 },
+                "error_type": {
+                  "type": "string",
+                  "enum": ["Typographical", "Numerical", "Omission/Insertion", "Interpretation", "Findings-Impression Discrepancy"]
+                },
+                "text_span": { "type": "string", "minLength": 1 },
+                "section": {
+                  "type": "string",
+                  "enum": ["Technique", "Clinical Information", "Comparison", "Findings", "Impression", "Other"]
+                },
+                "originating_step": { "type": "integer", "minimum": 1, "maximum": 6 },
+                "severity": { "type": "string", "enum": ["minor", "moderate", "major"] },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+                "uncertain": { "type": "boolean" },
+                "explanation": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "summary": {
+            "type": "object",
+            "required": ["n_errors", "by_type", "by_step", "mean_confidence"],
+            "additionalProperties": false,
+            "properties": {
+              "n_errors": { "type": "integer", "minimum": 0 },
+              "by_type": { "type": "object" },
+              "by_step": { "type": "object" },
+              "mean_confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        }
+      }
+    }
+  },
+  "worked_example": {
+    "input": {
+      "REPORT_TEXT": "TECHNIQUE: Non-contrast CT of the abdomen and pelvis.\nCLINICAL INDICATION: Right lower quadrant pain.\nFINDINGS: The liver is normal in size and attenuation. A 3.2 m hypodense lesion is noted in segment VII. The gallbladder, pancreas, and spleen are unremarkable. The uterus is unremarkable.\nIMPRESSION: Normal abdominal CT. Recommend clinical correlation.",
+      "MODALITY": "CT",
+      "BODY_REGION": "Abdomen and Pelvis",
+      "INDICATION": "Right lower quadrant pain",
+      "PRIOR_STUDIES": "None"
+    },
+    "expected_output": {
+      "abstain": false,
+      "abstain_reason": null,
+      "errors": [
+        {
+          "error_id": 1,
+          "error_type": "Numerical",
+          "text_span": "3.2 m hypodense lesion",
+          "section": "Findings",
+          "originating_step": 2,
+          "severity": "moderate",
+          "confidence": 0.97,
+          "uncertain": false,
+          "explanation": "Lesion size of 3.2 m is anatomically implausible; the intended unit is likely cm."
+        },
+        {
+          "error_id": 2,
+          "error_type": "Omission/Insertion",
+          "text_span": "The uterus is unremarkable.",
+          "section": "Findings",
+          "originating_step": 1,
+          "severity": "moderate",
+          "confidence": 0.88,
+          "uncertain": false,
+          "explanation": "Uterine anatomy should be evaluated only in anatomically appropriate patients; this may represent a template copy-forward error requiring verification against patient sex."
+        },
+        {
+          "error_id": 3,
+          "error_type": "Findings-Impression Discrepancy",
+          "text_span": "Normal abdominal CT.",
+          "section": "Impression",
+          "originating_step": 4,
+          "severity": "major",
+          "confidence": 0.95,
+          "uncertain": false,
+          "explanation": "Impression states a normal study, but findings describe a hepatic hypodense lesion that is not acknowledged in the impression."
+        }
+      ],
+      "summary": {
+        "n_errors": 3,
+        "by_type": { "Numerical": 1, "Omission/Insertion": 1, "Findings-Impression Discrepancy": 1 },
+        "by_step": { "1": 1, "2": 1, "4": 1 },
+        "mean_confidence": 0.933
+      }
+    }
+  },
+  "evaluation_alignment": {
+    "matching_rule": "A predicted error is counted as a true positive when (i) its text_span localizes to the same or an immediately adjacent sentence as the reference span, and (ii) its error_type matches the reference category after taxonomy normalization.",
+    "span_matching": "Sentence-level localization combined with semantic equivalence assessed via the authors' previously validated radiology sentence-matching model (Li et al., BMC Med Inform Decis Mak, 2022).",
+    "taxonomy_normalization": "Model-emitted category labels are mapped to the canonical five categories via the taxonomy.categories keys; unrecognized labels are treated as false positives.",
+    "abstention_handling": "Reports returned with abstain = true are excluded from per-report scoring and reported separately as abstained_n.",
+    "confidence_handling": "Confidence and uncertain flags are used only for downstream calibration analyses (Supplementary Table S5) and do not affect primary precision/recall calculation."
+  },
+  "framework_composition_note": "The prompts in this document constitute one component of the RadCoT evaluation framework. Full reproduction of the reported performance additionally requires: (a) JSON Schema validation of model outputs, (b) sentence-level span matching using the validated radiology matching model referenced above, (c) taxonomy-aware prediction–reference alignment, and (d) two-reader blinded verification with senior-radiologist adjudication, as described in Methods Section 2.6.",
+  "reproducibility_checklist": {
+    "prompts_provided": true,
+    "system_and_user_messages_separated": true,
+    "output_schema_versioned": true,
+    "decoding_parameters_fixed": true,
+    "taxonomy_versioned": true,
+    "disambiguation_rules_explicit": true,
+    "severity_rubric_explicit": true,
+    "abstention_policy_explicit": true,
+    "worked_example_included": true,
+    "evaluation_alignment_documented": true,
+    "public_repository": "https://github.com/currylee92/Radcot-project"
+  },
+  "change_log": [
+    { "version": "1.0", "date": "2026-01", "changes": "Initial release with two prompts, taxonomy, and schema." },
+    { "version": "2.0", "date": "2026-04", "changes": "Added error_type to baseline schema; formalized severity rubric, disambiguation rule, abstention policy, calibration notes, worked example, evaluation alignment section, and reproducibility checklist. Migrated schemas to JSON Schema Draft 2020-12." }
+  ]
+}
